@@ -8,6 +8,6 @@
 #ifndef ZSign_h
 #define ZSign_h
 
-#include "xzsign.h"
+#include "../xzsign.h"
 
 #endif /* CZSign_h */
