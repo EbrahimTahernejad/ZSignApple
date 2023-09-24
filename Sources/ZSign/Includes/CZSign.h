@@ -5,9 +5,9 @@
 //  Created by Ebrahim Tahernejad on 7/2/1402 AP.
 //
 
-#ifndef ZSign_h
-#define ZSign_h
+#ifndef CZSign_h
+#define CZSign_h
 
 #include "zsign.h"
 
-#endif /* ZSign_h */
+#endif /* CZSign_h */
