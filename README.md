@@ -18,7 +18,7 @@ let code = zsign(
 )
 
 // if code == 0 {
-//     on success
+//     ...on success...
 // }
 ```
 
