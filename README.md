@@ -2,9 +2,13 @@
 A [zsign](https://github.com/zhlynn/zsign) implementation for Apple devices (iOS, macOS).
 
 ## Usage
+### Import
 ```swift
 import ZSign
+```
 
+### Sign a folder
+```swift
 return zsign(
     folderToSign,
     certPath,
