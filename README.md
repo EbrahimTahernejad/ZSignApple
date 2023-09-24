@@ -9,13 +9,17 @@ import ZSign
 
 ### Sign a folder
 ```swift
-return zsign(
+let code = zsign(
     folderToSign,
     certPath,
     p12KeyPath,
     provisioningProfilePath,
     p12Password
 )
+
+// if code == 0 {
+//     on success
+// }
 ```
 
 
