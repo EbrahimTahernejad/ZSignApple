@@ -5,7 +5,6 @@ A [zsign](https://github.com/zhlynn/zsign) implementation for Apple devices (iOS
 ```swift
 import ZSign
 
-...
 return zsign(
     folderToSign,
     certPath,
