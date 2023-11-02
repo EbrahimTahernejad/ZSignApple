@@ -10,7 +10,7 @@ import ZSignCore
 
 public enum ZSign {
     public typealias Error = ZSignStatus
-    public func sign(
+    public static func sign(
         _ folder: URL,
         cert: URL,
         privateKey: URL,
