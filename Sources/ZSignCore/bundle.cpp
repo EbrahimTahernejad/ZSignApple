@@ -145,7 +145,7 @@ bool ZAppBundle::GetObjectsToSign(const string &strFolder, JValue &jvInfo)
 	return true;
 }
 
-void ZAppBundle::GetFolderFiles(const string &strFolder, const string &strBaseFolder, set<string> &setFiles)
+void ZAppBundle::GetFolderFiles(const string &strFolder, const string &strBaseFolder, set<string> &setFiles, map<string, string> &mapLinks)
 {
 	DIR *dir = opendir(strFolder.c_str());
 	if (NULL != dir)
@@ -160,11 +160,18 @@ void ZAppBundle::GetFolderFiles(const string &strFolder, const string &strBaseFo
 				strNode += ptr->d_name;
 				if (DT_DIR == ptr->d_type)
 				{
-					GetFolderFiles(strNode, strBaseFolder, setFiles);
+					GetFolderFiles(strNode, strBaseFolder, setFiles, mapLinks);
 				}
 				else if (DT_REG == ptr->d_type)
 				{
 					setFiles.insert(strNode.substr(strBaseFolder.size() + 1));
+				}
+				else if (DT_LNK == ptr->d_type)
+				{
+					char link[PATH_MAX];
+					ssize_t sz = readlink(strNode.c_str(), link, sizeof(link));
+					if (sz == -1) continue;
+					mapLinks[strNode.substr(strBaseFolder.size() + 1)] = string(link, sz);
 				}
 			}
 			ptr = readdir(dir);
@@ -178,7 +185,8 @@ bool ZAppBundle::GenerateCodeResources(const string &strFolder, JValue &jvCodeRe
 	jvCodeRes.clear();
 
 	set<string> setFiles;
-	GetFolderFiles(strFolder, strFolder, setFiles);
+	map<string, string> mapLinks;
+	GetFolderFiles(strFolder, strFolder, setFiles, mapLinks);
 
 	JValue jvInfo;
 	string strInfoPlistPath = strFolder + "/Info.plist";
@@ -239,6 +247,16 @@ bool ZAppBundle::GenerateCodeResources(const string &strFolder, JValue &jvCodeRe
 				jvCodeRes["files2"][strKey]["optional"] = true;
 			}
 		}
+	}
+
+	for (auto it = mapLinks.begin(); it != mapLinks.end(); it++)
+	{
+		const string &strKey = it->first;
+		string strFile = strFolder + "/" + strKey;
+		const string &link = it->second;
+
+		jvCodeRes["files"][strKey]["symlink"] = link;
+		jvCodeRes["files2"][strKey]["symlink"] = link;
 	}
 
 	jvCodeRes["rules"]["^.*"] = true;
@@ -314,15 +332,16 @@ void ZAppBundle::GetNodeChangedFiles(JValue &jvNode)
 	}
 }
 
-bool ZAppBundle::SignNode(JValue &jvNode)
+ZSignStatus ZAppBundle::SignNode(JValue &jvNode)
 {
 	if (jvNode.has("folders"))
 	{
 		for (size_t i = 0; i < jvNode["folders"].size(); i++)
 		{
-			if (!SignNode(jvNode["folders"][i]))
+            ZSignStatus signStatus = SignNode(jvNode["folders"][i]);
+			if (signStatus != ZSignStatusSuccess)
 			{
-				return false;
+				return signStatus;
 			}
 		}
 	}
@@ -336,11 +355,11 @@ bool ZAppBundle::SignNode(JValue &jvNode)
 			ZMachO macho;
 			if (!macho.InitV("%s/%s", m_strAppFolder.c_str(), szFile))
 			{
-				return false;
+				return ZSignStatusFailedMachOVariableArgumentListInitialization;
 			}
 			if (!macho.Sign(m_pSignAsset, m_bForceSign, "", "", "", ""))
 			{
-				return false;
+				return ZSignStatusFailedMachOSigningAsset;
 			}
 		}
 	}
@@ -356,7 +375,7 @@ bool ZAppBundle::SignNode(JValue &jvNode)
 	if (strBundleId.empty() || strBundleExe.empty() || strInfoPlistSHA1.empty() || strInfoPlistSHA256.empty())
 	{
 		ZLog::ErrorV(">>> Can't Get BundleID or BundleExecute or Info.plist SHASum in Info.plist! %s\n", strFolder.c_str());
-		return false;
+		return ZSignStatusAppInfoPlistIncomplete;
 	}
 
 	string strBaseFolder = m_strAppFolder;
@@ -373,7 +392,7 @@ bool ZAppBundle::SignNode(JValue &jvNode)
 	if (!macho.Init(strExePath.c_str()))
 	{
 		ZLog::ErrorV(">>> Can't Parse BundleExecute File! %s\n", strExePath.c_str());
-		return false;
+		return ZSignStatusFailedParsingBundleExecuteFile;
 	}
 
 	CreateFolderV("%s/_CodeSignature", strBaseFolder.c_str());
@@ -390,7 +409,7 @@ bool ZAppBundle::SignNode(JValue &jvNode)
 		if (!GenerateCodeResources(strBaseFolder, jvCodeRes))
 		{
 			ZLog::ErrorV(">>> Create CodeResources Failed! %s\n", strBaseFolder.c_str());
-			return false;
+			return ZSignStatusFailedCreatingCodeResources;
 		}
 	}
 	else if (jvNode.has("changed"))
@@ -405,7 +424,7 @@ bool ZAppBundle::SignNode(JValue &jvNode)
 			if (!SHASumBase64File(strRealFile.c_str(), strFileSHA1Base64, strFileSHA256Base64))
 			{
 				ZLog::ErrorV(">>> Can't Get Changed File SHASumBase64! %s", strFile.c_str());
-				return false;
+				return ZSignStatusFailedGettingChangedFileSHASumBase64;
 			}
 
 			string strKey = strFile;
@@ -426,7 +445,7 @@ bool ZAppBundle::SignNode(JValue &jvNode)
 	if (!WriteFile(strCodeResFile.c_str(), strCodeResData))
 	{
 		ZLog::ErrorV("\tWriting CodeResources Failed! %s\n", strCodeResFile.c_str());
-		return false;
+		return ZSignStatusFailedWritingCodeResource;
 	}
 
 	bool bForceSign = m_bForceSign;
@@ -437,10 +456,10 @@ bool ZAppBundle::SignNode(JValue &jvNode)
 
 	if (!macho.Sign(m_pSignAsset, bForceSign, strBundleId, strInfoPlistSHA1, strInfoPlistSHA256, strCodeResData))
 	{
-		return false;
+		return ZSignStatusFailedMachOSigningAsset;
 	}
 
-	return true;
+	return ZSignStatusSuccess;
 }
 
 void ZAppBundle::GetPlugIns(const string &strFolder, vector<string> &arrPlugIns)
@@ -471,7 +490,7 @@ void ZAppBundle::GetPlugIns(const string &strFolder, vector<string> &arrPlugIns)
 	}
 }
 
-bool ZAppBundle::SignFolder(ZSignAsset *pSignAsset,
+ZSignStatus ZAppBundle::SignFolder(ZSignAsset *pSignAsset,
 							const string &strFolder,
 							const string &strBundleID,
 							const string &strBundleVersion,
@@ -486,13 +505,13 @@ bool ZAppBundle::SignFolder(ZSignAsset *pSignAsset,
 	m_bWeakInject = bWeakInject;
 	if (NULL == m_pSignAsset)
 	{
-		return false;
+		return ZSignStatusSignAssetsMissing;
 	}
 
 	if (!FindAppFolder(strFolder, m_strAppFolder))
 	{
 		ZLog::ErrorV(">>> Can't Find App Folder! %s\n", strFolder.c_str());
-		return false;
+		return ZSignStatusAppFolderMissing;
 	}
 
 	if (!strBundleID.empty() || !strDisplayName.empty() || !strBundleVersion.empty())
@@ -572,7 +591,7 @@ bool ZAppBundle::SignFolder(ZSignAsset *pSignAsset,
 		else
 		{
 			ZLog::ErrorV(">>> Can't Find App's Info.plist! %s\n", strFolder.c_str());
-			return false;
+			return ZSignStatusAppInfoPlistMissing;
 		}
 	}
 
@@ -595,10 +614,10 @@ bool ZAppBundle::SignFolder(ZSignAsset *pSignAsset,
 		}
 	}
 
-	if (!WriteFile(pSignAsset->m_strProvisionData, "%s/embedded.mobileprovision", m_strAppFolder.c_str()))
+	if (!pSignAsset->m_strProvisionData.empty() && !WriteFile(pSignAsset->m_strProvisionData, "%s/embedded.mobileprovision", m_strAppFolder.c_str()))
 	{ //embedded.mobileprovision
 		ZLog::ErrorV(">>> Can't Write embedded.mobileprovision!\n");
-		return false;
+		return ZSignStatusWritingEmbeddedProvisioningProfileFailed;
 	}
 
 	if (!strDyLibFile.empty())
@@ -630,11 +649,11 @@ bool ZAppBundle::SignFolder(ZSignAsset *pSignAsset,
 		if (!GetSignFolderInfo(m_strAppFolder, jvRoot, true))
 		{
 			ZLog::ErrorV(">>> Can't Get BundleID, BundleVersion, or BundleExecute in Info.plist! %s\n", m_strAppFolder.c_str());
-			return false;
+			return ZSignStatusAppInfoPlistIncomplete;
 		}
 		if (!GetObjectsToSign(m_strAppFolder, jvRoot))
 		{
-			return false;
+			return ZSignStatusFailedGettingSignableObjects;
 		}
 		GetNodeChangedFiles(jvRoot);
 	}
@@ -651,15 +670,16 @@ bool ZAppBundle::SignFolder(ZSignAsset *pSignAsset,
 	ZLog::PrintV(">>> SubjectCN: \t%s\n", m_pSignAsset->m_strSubjectCN.c_str());
 	ZLog::PrintV(">>> ReadCache: \t%s\n", m_bForceSign ? "NO" : "YES");
 
-	if (SignNode(jvRoot))
+    ZSignStatus signStatus = SignNode(jvRoot);
+	if (signStatus == ZSignStatusSuccess)
 	{
 		if (bEnableCache)
 		{
 			CreateFolder("./.zsign_cache");
 			jvRoot.styleWritePath("./.zsign_cache/%s.json", strCacheName.c_str());
 		}
-		return true;
+		return ZSignStatusSuccess;
 	}
 
-	return false;
+	return signStatus;
 }

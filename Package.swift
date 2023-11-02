@@ -11,11 +11,15 @@ let package = Package(
     products: [
         .library(
             name: "ZSignApple",
-            targets: ["ZSign"]),
+            targets: ["ZSign", "ZSignCore"]),
     ],
     targets: [
         .target(
             name: "ZSign",
+            dependencies: ["ZSignCore"]
+        ),
+        .target(
+            name: "ZSignCore",
             dependencies: ["OpenSSL"],
             publicHeadersPath: "./Includes",
             cxxSettings: [

@@ -1,6 +1,7 @@
 #include "common/common.h"
 #include "common/base64.h"
 #include "openssl.h"
+#include "error.h"
 
 #include <openssl/pem.h>
 #include <openssl/cms.h>
@@ -13,8 +14,10 @@ class COpenSSLInit
 public:
 	COpenSSLInit()
 	{
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 		OpenSSL_add_all_algorithms();
 		ERR_load_crypto_strings();
+#endif
 	};
 };
 
@@ -331,7 +334,7 @@ bool GetCMSContent(const string &strCMSDataInput, string &strContentOutput)
 	return (!strContentOutput.empty());
 }
 
-bool GetCertSubjectCN(X509 *cert, string &strSubjectCN)
+bool GetCertSubjectField(X509 *cert, int nid, string &output)
 {
 	if (!cert)
 	{
@@ -340,7 +343,7 @@ bool GetCertSubjectCN(X509 *cert, string &strSubjectCN)
 
 	X509_NAME *name = X509_get_subject_name(cert);
 
-	int common_name_loc = X509_NAME_get_index_by_NID(name, NID_commonName, -1);
+	int common_name_loc = X509_NAME_get_index_by_NID(name, nid, -1);
 	if (common_name_loc < 0)
 	{
 		return CMSError();
@@ -358,9 +361,19 @@ bool GetCertSubjectCN(X509 *cert, string &strSubjectCN)
 		return CMSError();
 	}
 
-	strSubjectCN.clear();
-	strSubjectCN.append((const char *)common_name_asn1->data, common_name_asn1->length);
-	return (!strSubjectCN.empty());
+	output.clear();
+	output.append((const char *)common_name_asn1->data, common_name_asn1->length);
+	return (!output.empty());
+}
+
+bool GetCertSubjectCN(X509 *cert, string &strSubjectCN)
+{
+	return GetCertSubjectField(cert, NID_commonName, strSubjectCN);
+}
+
+bool GetCertSubjectOU(X509 *cert, string &strSubjectCN)
+{
+	return GetCertSubjectField(cert, NID_organizationalUnitName, strSubjectCN);
 }
 
 bool GetCertSubjectCN(const string &strCertData, string &strSubjectCN)
@@ -649,35 +662,35 @@ ZSignAsset::ZSignAsset()
 	m_x509Cert = NULL;
 }
 
-bool ZSignAsset::Init(const string &strSignerCertFile, const string &strSignerPKeyFile, const string &strProvisionFile, const string &strEntitlementsFile, const string &strPassword)
+ZSignStatus ZSignAsset::Init(X509 *cert, EVP_PKEY *pkey, const string &profile, const string &entitlements)
 {
-	ReadFile(strProvisionFile.c_str(), m_strProvisionData);
-	ReadFile(strEntitlementsFile.c_str(), m_strEntitlementsData);
-	if (m_strProvisionData.empty())
+	m_strProvisionData = profile;
+	m_strEntitlementsData = entitlements;
+	m_evpPKey = pkey;
+	m_x509Cert = cert;
+
+	if (!GetCertSubjectCN(cert, m_strSubjectCN))
 	{
-		ZLog::Error(">>> Can't Find Provision File!\n");
-		return false;
+		ZLog::Error(">>> Can't Find Paired Certificate Subject Common Name!\n");
+		return ZSignStatusCertificateCommonNameMissing;
 	}
 
-	JValue jvProv;
-	string strProvContent;
-	if (GetCMSContent(m_strProvisionData, strProvContent))
+	if (!GetCertSubjectOU(cert, m_strTeamId))
 	{
-		if (jvProv.readPList(strProvContent))
-		{
-			m_strTeamId = jvProv["TeamIdentifier"][0].asCString();
-			if (m_strEntitlementsData.empty())
-			{
-				jvProv["Entitlements"].writePList(m_strEntitlementsData);
-			}
-		}
+		ZLog::Error(">>> Can't Find Paired Certificate Subject Organizational Unit!\n");
+		return ZSignStatusCertificateOrganizationalUnitMissing;
 	}
 
-	if (m_strTeamId.empty())
-	{
-		ZLog::Error(">>> Can't Find TeamId!\n");
-		return false;
-	}
+	return ZSignStatusSuccess;
+}
+
+ZSignStatus ZSignAsset::Init(const string &strSignerCertFile, const string &strSignerPKeyFile, const string &strProvisionFile, const string &strEntitlementsFile, const string &strPassword)
+{
+	string entitlements;
+	ReadFile(strEntitlementsFile.c_str(), entitlements);
+
+	string profile;
+	ReadFile(strProvisionFile.c_str(), profile);
 
 	X509 *x509Cert = NULL;
 	EVP_PKEY *evpPKey = NULL;
@@ -709,23 +722,21 @@ bool ZSignAsset::Init(const string &strSignerCertFile, const string &strSignerPK
 	if (NULL == evpPKey)
 	{
 		ZLog::Error(">>> Can't Load P12 or PrivateKey File! Please Input The Correct File And Password!\n");
-		return false;
+		return ZSignStatusInvalidPrivateKeyOrPassword;
 	}
 
-	if (NULL == x509Cert && !strSignerCertFile.empty())
-	{
-		BIO *bioCert = BIO_new_file(strSignerCertFile.c_str(), "r");
-		if (NULL != bioCert)
-		{
-			x509Cert = PEM_read_bio_X509(bioCert, NULL, 0, NULL);
-			if (NULL == x509Cert)
-			{
-				BIO_reset(bioCert);
-				x509Cert = d2i_X509_bio(bioCert, NULL);
-			}
-			BIO_free(bioCert);
-		}
+	BIO *bioCert = BIO_new_file(strSignerCertFile.c_str(), "r");
+	if (!bioCert) {
+		ZLog::Error(">>> Couldn't read certificate!");
+		return ZSignStatusInvalidCertificate;
 	}
+	x509Cert = PEM_read_bio_X509(bioCert, NULL, 0, NULL);
+	if (NULL == x509Cert)
+	{
+		BIO_reset(bioCert);
+		x509Cert = d2i_X509_bio(bioCert, NULL);
+	}
+	BIO_free(bioCert);
 
 	if (NULL != x509Cert)
 	{
@@ -738,42 +749,11 @@ bool ZSignAsset::Init(const string &strSignerCertFile, const string &strSignerPK
 
 	if (NULL == x509Cert)
 	{
-		for (size_t i = 0; i < jvProv["DeveloperCertificates"].size(); i++)
-		{
-			string strCertData = jvProv["DeveloperCertificates"][i].asData();
-			BIO *bioCert = BIO_new_mem_buf(strCertData.c_str(), (int)strCertData.size());
-			if (NULL != bioCert)
-			{
-				x509Cert = d2i_X509_bio(bioCert, NULL);
-				if (NULL != x509Cert)
-				{
-					if (X509_check_private_key(x509Cert, evpPKey))
-					{
-						break;
-					}
-					X509_free(x509Cert);
-					x509Cert = NULL;
-				}
-				BIO_free(bioCert);
-			}
-		}
-	}
-
-	if (NULL == x509Cert)
-	{
 		ZLog::Error(">>> Can't Find Paired Certificate And PrivateKey!\n");
-		return false;
+		return ZSignStatusCertificateAndPrivateKeyMismatch;
 	}
 
-	if (!GetCertSubjectCN(x509Cert, m_strSubjectCN))
-	{
-		ZLog::Error(">>> Can't Find Paired Certificate Subject Common Name!\n");
-		return false;
-	}
-
-	m_evpPKey = evpPKey;
-	m_x509Cert = x509Cert;
-	return true;
+	return Init(x509Cert, evpPKey, profile, entitlements);
 }
 
 bool ZSignAsset::GenerateCMS(const string &strCDHashData, const string &strCDHashesPlist, const string &strCodeDirectorySlotSHA1, const string &strAltnateCodeDirectorySlot256, string &strCMSOutput)
