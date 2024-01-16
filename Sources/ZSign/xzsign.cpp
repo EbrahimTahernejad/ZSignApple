@@ -7,7 +7,7 @@
 #include <libgen.h>
 #include <dirent.h>
 #include <getopt.h>
-#include <openssl/crypto.h>
+
 
 int zsign(const char *path,
           
