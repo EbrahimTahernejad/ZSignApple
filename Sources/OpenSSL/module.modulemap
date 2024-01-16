@@ -1,8 +1,4 @@
-//
-//  File.swift
-//  
-//
-//  Created by Ebrahim Tahernejad on 1/16/24.
-//
-
-import Foundation
+module OpenSSL [system] {
+    link "ssl"
+    link "crypto"
+}

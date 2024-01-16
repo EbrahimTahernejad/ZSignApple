@@ -4,10 +4,6 @@ import PackageDescription
 
 let package = Package(
     name: "ZSignApple",
-    platforms: [
-        .iOS(.v12),
-        .macOS(.v10_13),
-    ],
     products: [
         .library(
             name: "ZSignApple",
@@ -25,10 +21,14 @@ let package = Package(
                 .linkedFramework("OpenSSL"),
             ]
         ),
-        .binaryTarget(
+        .systemLibrary(
             name: "OpenSSL",
-            path: "Binaries/OpenSSL.xcframework"
-        ),
+            pkgConfig: "openssl",
+            providers: [
+                .apt(["openssl libssl-dev"]),
+                .brew(["openssl"]),
+            ]
+        )
     ],
     cxxLanguageStandard: .cxx14
 )
