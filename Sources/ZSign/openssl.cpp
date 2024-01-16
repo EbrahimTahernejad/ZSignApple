@@ -8,6 +8,7 @@
 #include <openssl/pkcs12.h>
 #include <openssl/conf.h>
 #include <openssl/provider.h>
+#include <openssl/evp.h>
 
 class COpenSSLInit
 {
@@ -15,17 +16,33 @@ public:
 	COpenSSLInit()
 	{
         OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, NULL);
-        OSSL_PROVIDER *default_provider = OSSL_PROVIDER_load(NULL, "default");
+        default_provider = OSSL_PROVIDER_load(NULL, "default");
         if (default_provider == NULL) {
             std::cout << "error loading default provider" << std::endl;
         }
-        OSSL_PROVIDER *legacy_provider = OSSL_PROVIDER_load(NULL, "legacy");
+        legacy_provider = OSSL_PROVIDER_load(NULL, "legacy");
         if (legacy_provider == NULL) {
             std::cout << "error loading legacy provider" << std::endl;
         }
         OpenSSL_add_all_algorithms();
         ERR_load_crypto_strings();
 	};
+    
+    ~COpenSSLInit()
+    {
+        if (legacy_provider != NULL) {
+            OSSL_PROVIDER_unload(legacy_provider);
+        }
+        if (default_provider != NULL) {
+            OSSL_PROVIDER_unload(default_provider);
+        }
+        
+        EVP_cleanup();
+        ERR_free_strings();
+    }
+private:
+    OSSL_PROVIDER *default_provider = NULL;
+    OSSL_PROVIDER *legacy_provider = NULL;
 };
 
 COpenSSLInit g_OpenSSLInit;

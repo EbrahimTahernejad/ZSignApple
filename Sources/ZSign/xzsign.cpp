@@ -16,8 +16,6 @@ int zsign(const char *path,
           const char *provFile,
           const char *password)
 {
-    std::cout << SSLeay_version(0) << std::endl;
-
     bool bWeakInject = false;
     bool bForce = true;
     bool bEnableCache = false;
@@ -31,9 +29,7 @@ int zsign(const char *path,
     string strDyLibFile;
     string strDisplayName;
     string strEntitlementsFile;
-    
-    cout << strPKeyFile << endl;
-    
+        
     string strPath = path ? GetCanonicalizePath(path) : "";
     if (!IsFileExists(strPath.c_str()))
     {
