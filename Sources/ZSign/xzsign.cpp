@@ -7,6 +7,7 @@
 #include <libgen.h>
 #include <dirent.h>
 #include <getopt.h>
+#include <openssl/crypto.h>
 
 int zsign(const char *path,
           
@@ -15,6 +16,8 @@ int zsign(const char *path,
           const char *provFile,
           const char *password)
 {
+    std::cout << SSLeay_version() << std::endl;
+
     bool bWeakInject = false;
     bool bForce = true;
     bool bEnableCache = false;
