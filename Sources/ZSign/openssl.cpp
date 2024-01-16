@@ -7,12 +7,14 @@
 #include <openssl/err.h>
 #include <openssl/pkcs12.h>
 #include <openssl/conf.h>
+#include <openssl/provider.h>
 
 class COpenSSLInit
 {
 public:
 	COpenSSLInit()
 	{
+		OSSL_PROVIDER_load(NULL, "legacy");
 		OpenSSL_add_all_algorithms();
 		ERR_load_crypto_strings();
 	};
