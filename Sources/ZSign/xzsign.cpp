@@ -16,7 +16,7 @@ int zsign(const char *path,
           const char *provFile,
           const char *password)
 {
-    std::cout << SSLeay_version() << std::endl;
+    std::cout << SSLeay_version(0) << std::endl;
 
     bool bWeakInject = false;
     bool bForce = true;
