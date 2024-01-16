@@ -16,9 +16,6 @@ let package = Package(
             publicHeadersPath: "./Includes",
             cxxSettings: [
                 .headerSearchPath("."),
-            ],
-            linkerSettings: [
-                .linkedFramework("OpenSSL"),
             ]
         ),
         .systemLibrary(
